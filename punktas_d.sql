@@ -1,57 +1,40 @@
 CREATE OR REPLACE FUNCTION remove_invalid_choices RETURN VARCHAR2 IS
     v_deleted_count NUMBER := 0;
+    v_reason VARCHAR2(200);
 BEGIN
- -- Delete invalid records and count them
- -- Condition 1: Semester mismatch
-    DELETE FROM choosen_subject cs
-    WHERE
-        EXISTS (
-            SELECT
-                1
-            FROM
-                student  s,
-                subject  sub
-            WHERE
-                cs.student_id = s.id
-                AND cs.subject_id = sub.id
-                AND s.semester != sub.semester
-        );
-    v_deleted_count := v_deleted_count + sql%rowcount;
- -- Condition 2: Lecturer faculty mismatch
-    DELETE FROM choosen_subject cs
-    WHERE
-        EXISTS (
-            SELECT
-                1
-            FROM
-                student  s,
-                subject  sub,
-                lecturer l
-            WHERE
-                cs.student_id = s.id
-                AND cs.subject_id = sub.id
-                AND sub.lecturer_id = l.id
-                AND s.faculty_id != l.faculty_id
-        );
-    v_deleted_count := v_deleted_count + sql%rowcount;
- -- Condition 3: Student has chosen the subject only once
-    DELETE FROM choosen_subject cs
-    WHERE
-        (
-            SELECT
-                COUNT(*)
-            FROM
-                choosen_subject cs2
-            WHERE
-                cs2.student_id = cs.student_id
-                AND cs2.subject_id = cs.subject_id
-        ) = 1;
-    v_deleted_count := v_deleted_count + sql%rowcount;
-    RETURN 'Total invalid records deleted: '
-        || v_deleted_count;
+    -- Loop through all records in choosen_subject
+    FOR rec IN (SELECT student_id, subject_id FROM choosen_subject) LOOP
+        -- Validate each record using validate_choice function
+        v_reason := validate_choice(rec.student_id, rec.subject_id);
+        
+        -- Check the validation result and delete the record if invalid
+        IF v_reason != 'Valid' THEN
+            DELETE FROM choosen_subject cs
+            WHERE cs.student_id = rec.student_id AND cs.subject_id = rec.subject_id;
+            v_deleted_count := v_deleted_count + SQL%ROWCOUNT;
+            
+            -- Optionally, insert the invalid record and reason into invalid_records table
+            -- Assuming you have an invalid_records table to store these details
+            INSERT INTO invalid_records (student_id, subject_id, reason)
+            VALUES (rec.student_id, rec.subject_id, v_reason);
+        END IF;
+    END LOOP;
+
+    RETURN 'Total invalid records deleted: ' || v_deleted_count;
 EXCEPTION
     WHEN OTHERS THEN
-        RETURN 'An error occurred: '
-            || sqlerrm;
+        -- Assuming G_ERROR_HANDLING.LOG_ERROR() is a custom procedure to log errors
+        G_ERROR_HANDLING.LOG_ERROR();
+        RETURN 'An error occurred: ' || SQLERRM;
 END remove_invalid_choices;
 /
+
+
+SET SERVEROUTPUT ON
+
+DECLARE
+    v_result VARCHAR2(200);
+BEGIN
+    v_result := remove_invalid_choices;
+    DBMS_OUTPUT.PUT_LINE(v_result);
+END;
